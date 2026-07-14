@@ -5,8 +5,8 @@
 **Automatic model switching for Claude Code. No API calls, no config.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
-![Shell](https://img.shields.io/badge/shell-bash-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+![Python](https://img.shields.io/badge/python-3.6%2B-blue)
 
 <video src="docs/slides/public/model-router.mov" width="887" controls></video>
 
@@ -24,9 +24,9 @@ A Claude Code hook system that classifies every prompt by task complexity and sw
 
 ## How It Works
 
-Two hook scripts run inside Claude Code:
+Two hook scripts run inside Claude Code (Python-based, cross-platform — works on Windows, macOS, and Linux):
 
-**`session-init.sh`** (`SessionStart`) injects a `systemMessage` into every session that enforces these sub-agent rules:
+**`session_init.py`** (`SessionStart`) injects a `systemMessage` into every session that enforces these sub-agent rules:
 
 | Tier | Use for |
 |------|---------|
@@ -36,7 +36,7 @@ Two hook scripts run inside Claude Code:
 
 ![Sub-agent spawned with Sonnet 4.6 model](assets/sub-agent-routing.png)
 
-**`model-router-hook.sh`** (`UserPromptSubmit`) classifies the incoming prompt and compares the recommended tier against the current model in `settings.json`. By default it warns with a recommendation; set `"action": "autoswitch"` in your config to switch automatically.
+**`prompt_router.py`** (`UserPromptSubmit`) classifies the incoming prompt and compares the recommended tier against the current model in `settings.json`. By default it warns with a recommendation; set `"action": "autoswitch"` in your config to switch automatically.
 
 ## Installation
 
@@ -49,36 +49,48 @@ claude plugin install claude-model-router-hook@claude-model-router-hook
 
 Hooks are registered automatically. Restart Claude Code to activate.
 
-### One-liner (manual)
+### Cross-platform install (Windows, macOS, Linux)
+
+Requires Python 3.6+.
+
+```bash
+git clone https://github.com/tzachbon/claude-model-router-hook.git
+cd claude-model-router-hook
+python install.py
+```
+
+The installer copies the hook scripts to `~/.claude/hooks/` and prints the `settings.json` entries to add.
+
+### One-liner (macOS/Linux only)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tzachbon/claude-model-router-hook/main/install.sh | bash
 ```
 
-### Manual
+### Manual setup
+
+Copy the hook files:
 
 ```bash
-git clone https://github.com/tzachbon/claude-model-router-hook.git
-cd claude-model-router-hook
-./install.sh
-```
-
-Or copy manually:
-
-```bash
+# macOS/Linux
 mkdir -p ~/.claude/hooks
-cp hooks/session-init.sh hooks/model-router-hook.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/session-init.sh ~/.claude/hooks/model-router-hook.sh
+cp plugins/claude-model-router-hook/hooks/{session_init.py,prompt_router.py,model_router.py} ~/.claude/hooks/
 ```
 
-Then add hooks to `~/.claude/settings.json` (use the full absolute path from `echo $HOME`):
+```powershell
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\hooks"
+Copy-Item plugins/claude-model-router-hook/hooks/session_init.py,plugins/claude-model-router-hook/hooks/prompt_router.py,plugins/claude-model-router-hook/hooks/model_router.py "$env:USERPROFILE\.claude\hooks\"
+```
 
-Under `SessionStart`:
+Then add hooks to `~/.claude/settings.json`:
+
+Under `SessionStart` (use `python3` on macOS/Linux, `python` on Windows):
 
 ```json
 {
   "type": "command",
-  "command": "/home/yourname/.claude/hooks/session-init.sh",
+  "command": "python3 \"/home/yourname/.claude/hooks/session_init.py\"",
   "timeout": 2
 }
 ```
@@ -92,12 +104,22 @@ Under `UserPromptSubmit`:
     "hooks": [
       {
         "type": "command",
-        "command": "/home/yourname/.claude/hooks/model-router-hook.sh",
+        "command": "python3 \"/home/yourname/.claude/hooks/prompt_router.py\"",
         "timeout": 2
       }
     ]
   }
 ]
+```
+
+On Windows, use `python` and your Windows home path:
+
+```json
+{
+  "type": "command",
+  "command": "python \"C:/Users/yourname/.claude/hooks/session_init.py\"",
+  "timeout": 2
+}
 ```
 
 Then restart Claude Code.

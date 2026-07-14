@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-init.sh",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_init.py\"",
             "timeout": 2
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/model-router-hook.sh",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt_router.py\"",
             "timeout": 2
           }
         ]
