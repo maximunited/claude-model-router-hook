@@ -7,36 +7,50 @@ When installed as a Claude Code plugin, hooks/hooks.json auto-registers the
 four Python entrypoints and no manual step is needed. This script mirrors
 that setup for a manual clone-and-install into ~/.claude.
 
-Usage: python install.py
+Usage: python3 install.py   (Windows: py install.py)
 """
 
 import json
 import pathlib
-import platform
 import shutil
 import subprocess
 import sys
 
-ENTRYPOINTS = [
-    # (file, hook event, matcher, timeout)
-    ("session_init.py", "SessionStart", None, 5),
-    ("user_prompt_submit.py", "UserPromptSubmit", None, 10),
-    ("pre_tool_use.py", "PreToolUse", "Agent|Task", 10),
-    ("post_tool_use.py", "PostToolUse", "Agent|Task", 5),
-]
+MIN_PYTHON = (3, 10)  # router/ladder.py uses PEP 604 `X | None` annotations
+PLUGIN_ROOT_TOKEN = "${CLAUDE_PLUGIN_ROOT}/hooks/"
 
 
-def python_command():
-    """The interpreter name to put in settings.json hook commands."""
-    if platform.system() == "Windows":
-        # `python3` on Windows is often the Microsoft Store alias stub.
-        return "python"
-    return "python3"
+def hook_registrations(script_dir, hooks_dir):
+    """Derive settings.json hook entries from hooks/hooks.json (single source of
+    truth), pointed at the installed copies and at the interpreter running this
+    installer -- which is known to be new enough, unlike whatever `python` or
+    `python3` resolves to on PATH."""
+    spec = json.loads((script_dir / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    interpreter = pathlib.Path(sys.executable).as_posix()
+    target = hooks_dir.as_posix() + "/"
+    for event, groups in spec["hooks"].items():
+        for group in groups:
+            for hook in group["hooks"]:
+                cmd = hook["command"]
+                if not cmd.startswith("python3 ") or PLUGIN_ROOT_TOKEN not in cmd:
+                    raise SystemExit(f"Unexpected hook command in hooks.json: {cmd!r}")
+                hook["command"] = f'"{interpreter}" ' + cmd[len("python3 "):].replace(PLUGIN_ROOT_TOKEN, target)
+            yield event, group
+
+
+def entrypoint_files(script_dir):
+    spec = json.loads((script_dir / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    names = []
+    for groups in spec["hooks"].values():
+        for group in groups:
+            for hook in group["hooks"]:
+                names.append(hook["command"].split(PLUGIN_ROOT_TOKEN, 1)[1].strip('"'))
+    return names
 
 
 def main():
-    if sys.version_info < (3, 8):
-        sys.exit("Python 3.8+ is required.")
+    if sys.version_info < MIN_PYTHON:
+        sys.exit(f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required (found {sys.version.split()[0]}).")
 
     script_dir = pathlib.Path(__file__).resolve().parent
     repo_root = script_dir.parent.parent
@@ -51,21 +65,9 @@ def main():
     for d in (hooks_dir, agents_dir, schema_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    # Router package
-    shutil.rmtree(hooks_dir / "router", ignore_errors=True)
-    shutil.copytree(
-        script_dir / "hooks" / "router",
-        hooks_dir / "router",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-    )
-
-    # Python entrypoints
-    for name, _, _, _ in ENTRYPOINTS:
-        shutil.copy2(script_dir / "hooks" / name, hooks_dir / name)
-
-    # Routed agent variants, generated from the resolved config so only tiers
-    # the config actually targets get an agent file. A failure aborts the
-    # install (same reasoning as install.sh).
+    # Routed agent variants first: the generator imports the router package
+    # from this repo, so a conflict or failure aborts before any installed hook
+    # code is touched (no half-upgraded state).
     sys.stdout.flush()
     result = subprocess.run(
         [
@@ -79,6 +81,27 @@ def main():
     if result.returncode != 0:
         sys.exit(result.returncode)
 
+    # Router package
+    router_dst = hooks_dir / "router"
+    try:
+        if router_dst.exists():
+            shutil.rmtree(router_dst)
+        shutil.copytree(
+            script_dir / "hooks" / "router",
+            router_dst,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    except OSError as exc:
+        sys.exit(
+            f"Could not replace {router_dst}: {exc}\n"
+            "Close any running Claude Code sessions and re-run the installer."
+        )
+
+    # Python entrypoints
+    entrypoints = entrypoint_files(script_dir)
+    for name in entrypoints:
+        shutil.copy2(script_dir / "hooks" / name, hooks_dir / name)
+
     # Config schema (v1 + v2 shapes)
     shutil.copy2(
         repo_root / "schema" / "model-router.schema.json",
@@ -87,33 +110,20 @@ def main():
 
     print()
     print("Installed:")
-    print(f"  hooks/router/                     -> {hooks_dir / 'router'}")
-    for name, _, _, _ in ENTRYPOINTS:
+    print(f"  hooks/router/                     -> {router_dst}")
+    for name in entrypoints:
         print(f"  hooks/{name:<28}-> {hooks_dir / name}")
     print(f"  agents/routed-*.md                -> {agents_dir}")
     print(f"  schema/model-router.schema.json   -> {schema_dir}")
 
-    py = python_command()
-    hooks_dir_str = hooks_dir.as_posix()
-    snippet = {"hooks": {}}
-    for name, event, matcher, timeout in ENTRYPOINTS:
-        group = {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": f'{py} "{hooks_dir_str}/{name}"',
-                    "timeout": timeout,
-                }
-            ]
-        }
-        if matcher:
-            group = {"matcher": matcher, **group}
-        snippet["hooks"][event] = [group]
-
     print()
-    print("Merge the following into ~/.claude/settings.json:")
-    print()
-    print(json.dumps(snippet, indent=2))
+    print("Register the following in ~/.claude/settings.json.")
+    print("APPEND each entry to the existing array for its event -- do not replace")
+    print("the arrays, or any hooks you already have for that event are dropped.")
+    for event, group in hook_registrations(script_dir, hooks_dir):
+        print()
+        print(f'Under "hooks" > "{event}":')
+        print("  " + json.dumps(group))
     print()
     print(f"Routed subagent variants installed to {agents_dir}, one per configured class target (listed above).")
     print()

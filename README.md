@@ -108,11 +108,14 @@ cd claude-model-router-hook
 ./plugins/claude-model-router-hook/install.sh
 ```
 
-On Windows (or anywhere without bash), use the Python equivalent:
+On Windows (or anywhere without bash), use the Python equivalent (Python 3.10+):
 
 ```powershell
-python plugins/claude-model-router-hook/install.py
+py plugins/claude-model-router-hook/install.py       # Windows
+python3 plugins/claude-model-router-hook/install.py  # macOS / Linux
 ```
+
+The printed hook commands use the absolute path of the interpreter that ran the installer, so they keep working even if `python`/`python3` on `PATH` is a different version or the Windows Store alias.
 
 The manual installer prints the `settings.json` entries that you need to add.
 
