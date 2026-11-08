@@ -108,6 +108,12 @@ cd claude-model-router-hook
 ./plugins/claude-model-router-hook/install.sh
 ```
 
+On Windows (or anywhere without bash), use the Python equivalent:
+
+```powershell
+python plugins/claude-model-router-hook/install.py
+```
+
 The manual installer prints the `settings.json` entries that you need to add.
 
 </details>
