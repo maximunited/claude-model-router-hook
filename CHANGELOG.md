@@ -13,6 +13,7 @@ All notable changes to this project will be documented here.
 
 ### Fixed
 - CLI fallback classifier resolves the `claude` binary through `shutil.which`, so the npm `claude.cmd` shim is found on Windows (a bare `claude` argv never matched without a shell).
+- `install.py` no longer prints hook commands that start with a quoted interpreter path. Claude Code on Windows runs hook commands through PowerShell, where a leading string literal followed by another token is a ParserError, so every registered hook failed at startup. Space-free paths are printed unquoted; paths with spaces use the call operator with a warning.
 
 ## [2.1.0] - 2026-08-28
 

@@ -34,8 +34,29 @@ def hook_registrations(script_dir, hooks_dir):
                 cmd = hook["command"]
                 if not cmd.startswith("python3 ") or PLUGIN_ROOT_TOKEN not in cmd:
                     raise SystemExit(f"Unexpected hook command in hooks.json: {cmd!r}")
-                hook["command"] = f'"{interpreter}" ' + cmd[len("python3 "):].replace(PLUGIN_ROOT_TOKEN, target)
+                script = cmd[len("python3 "):].replace(PLUGIN_ROOT_TOKEN, target).strip().strip('"')
+                hook["command"] = _shell_command(interpreter, script)
             yield event, group
+
+
+def _shell_command(interpreter, script):
+    """One command line that parses under PowerShell, cmd.exe and sh.
+
+    Claude Code on Windows hands hook commands to PowerShell, where a line
+    that *starts* with a quoted string is a ParserError (a string literal
+    followed by another token), so quoting the interpreter path breaks every
+    hook. Paths without spaces need no quotes in any of the three shells.
+    A path with spaces gets the PowerShell call operator, which cmd and sh
+    cannot parse, so the installer says so rather than emitting it silently.
+    """
+    if " " not in interpreter and " " not in script:
+        return f"{interpreter} {script}"
+    print(
+        "Note: a path contains spaces; the printed commands use PowerShell's "
+        "call operator (&). On a host that runs hooks through cmd.exe or sh, "
+        "move Python or the hooks directory to a space-free path instead."
+    )
+    return f'& "{interpreter}" "{script}"'
 
 
 def entrypoint_files(script_dir):
