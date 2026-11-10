@@ -19,7 +19,7 @@ info: |
 </div>
 
 <!--
-Welcome! I'm going to walk you through a hook I built for Claude Code that keeps truly mechanical work on Haiku and defaults agentic coding to Opus at the effort level the task needs. Sonnet and Fable remain configurable alternatives. Classification is heuristics-first with an optional headless Claude CLI fallback, so no API key is needed. By default it warns; autoswitch is opt-in.
+Welcome! I'm going to walk you through a hook I built for Claude Code that keeps truly mechanical work on Haiku and defaults agentic coding to Opus at the effort level the task needs. The whole ladder is configurable per task class, and Fable is a first-class target for extreme work, not just a bolt-on alternative. Classification is heuristics-first with an optional headless Claude CLI fallback, so no API key is needed. By default it warns; autoswitch is opt-in.
 -->
 
 ---
@@ -92,7 +92,7 @@ layout: center
 <div v-click class="bg-white/5 border border-white/10 rounded-2xl p-4">
 <h3 class="text-rose-400 text-base font-semibold mb-2">Opus · max</h3>
 <p class="opacity-60 text-xs leading-relaxed">program-scale migration, RFC, and long-horizon work; <code>max</code> is session-only</p>
-<p class="opacity-40 text-xs mt-2">Fable remains opt-in by config</p>
+<p class="opacity-40 text-xs mt-2">Fable is a first-class extreme target when <code>allow_fable_autoswitch</code> is on</p>
 </div>
 </div>
 
@@ -101,11 +101,11 @@ layout: center
 </p>
 
 <p v-click class="text-center mt-3 opacity-60 text-sm">
-<span class="text-amber-400 font-semibold">Fully customizable</span> — override keywords, patterns & thresholds via <code>model-router.json</code>
+<span class="text-amber-400 font-semibold">Fully customizable</span> — the whole ladder is configurable per class via <code>model-router.json</code>, not just keywords, patterns & thresholds
 </p>
 
 <!--
-Quality-first defaults: Haiku handles short mechanical prompts matching git/rename/format patterns. Opus handles feature work at medium effort, debugging at high, architecture at xhigh, and program-scale work at max. Classification is heuristics-first with keyword and regex matching, plus an optional headless Claude CLI fallback you can disable. Fable remains available as an explicit configuration target and its autoswitch is gated behind allow_fable_autoswitch.
+Quality-first defaults, shown here, ship Haiku for feature work at medium effort, debugging at high, architecture at xhigh, and program-scale work at max — but every class target is configurable per class, not fixed: any class can point at any model and effort. Fable is a first-class target for extreme work when allow_fable_autoswitch is on, not a bolt-on. Classification is heuristics-first with keyword and regex matching, plus an optional headless Claude CLI fallback you can disable. The model IDs behind each alias are resolved from local caches (Claude Code's own recorded usage, env overrides, a static floor) — the alias is what does the real routing; the ID is just what it's informationally reported as.
 -->
 
 ---

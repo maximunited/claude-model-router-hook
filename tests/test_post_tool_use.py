@@ -19,6 +19,7 @@ class TestPostToolUseTelemetry(unittest.TestCase):
     def _run(self, home, payload):
         env = dict(os.environ)
         env["HOME"] = home
+        env["USERPROFILE"] = home
         env.pop("CLAUDE_MODEL_ROUTER_CHILD", None)
         return subprocess.run(
             [sys.executable, POST_HOOK],

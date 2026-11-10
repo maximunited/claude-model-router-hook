@@ -10,8 +10,16 @@ import sys
 import tempfile
 from datetime import datetime
 
-LOG_PATH = os.path.expanduser("~/.claude/hooks/model-router-hook.log")
 CHILD_ENV = "CLAUDE_MODEL_ROUTER_CHILD"
+
+
+def _resolve_log_path():
+    """Resolve the log path at call time so environment changes are respected."""
+    return os.path.expanduser("~/.claude/hooks/model-router-hook.log")
+
+
+# Backward-compatible module attribute; log() calls _resolve_log_path() instead.
+LOG_PATH = _resolve_log_path()
 
 
 def fail_open(fn):
@@ -151,12 +159,13 @@ def settings_masked():
 def log(action, prompt, **kv):
     """Append a log line with a max 30-char prompt snippet (NFR-5). Never raises."""
     try:
+        path = _resolve_log_path()
         snippet = prompt[:30].replace("\n", " ") + ("..." if len(prompt) > 30 else "")
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         fields = " ".join(f"{k}={v}" for k, v in kv.items())
         line = f"[{ts}] action={action}" + (f" {fields}" if fields else "")
-        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
-        with open(LOG_PATH, "a") as f:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a") as f:
             f.write(f'{line} prompt="{snippet}"\n')
     except Exception:
         pass

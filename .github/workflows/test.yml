@@ -32,3 +32,30 @@ jobs:
 
       - name: Agent variant parity
         run: python3 scripts/generate_variants.py --check
+
+  test-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Unit tests
+        shell: pwsh
+        run: python -m unittest discover tests -v
+
+      - name: Eval gate
+        shell: pwsh
+        run: python tests/eval/run_eval.py
+
+      - name: Docs parity
+        shell: pwsh
+        run: python scripts/sync_docs.py --check
+
+      - name: Agent variant parity
+        shell: pwsh
+        run: python scripts/generate_variants.py --check

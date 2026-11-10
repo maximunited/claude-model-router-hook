@@ -15,6 +15,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "plugins", "cla
 from router.config import DEFAULTS, load_config, migrate_v1, resolve_list, safe_regex_match
 from router import taxonomy
 
+from _home import write_home_sentinel
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -98,6 +100,7 @@ class TestLoadConfig(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        write_home_sentinel(self.tmpdir)
 
     def test_no_config_returns_defaults(self):
         nonexistent = os.path.join(self.tmpdir, "missing.json")
@@ -267,6 +270,7 @@ class TestNormalizeConfig(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        write_home_sentinel(self.tmpdir)
 
     def _load(self, data):
         global_f = os.path.join(self.tmpdir, "global.json")

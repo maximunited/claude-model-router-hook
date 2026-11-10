@@ -16,6 +16,8 @@ from unittest import mock
 
 # Add hooks/ to import path so we can import the router package
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "plugins", "claude-model-router-hook", "hooks"))
+
+from _home import write_home_sentinel
 from router.ladder import (  # noqa: E402
     TIERS,
     MODEL_IDS,
@@ -466,6 +468,7 @@ class TestLoadConfigSafety(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        write_home_sentinel(self.tmpdir)
 
     def test_unparseable_file_falls_back_to_defaults(self):
         bad = os.path.join(self.tmpdir, "bad.json")

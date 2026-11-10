@@ -41,6 +41,20 @@ Claude Model Router classifies each prompt by task and effort, then recommends t
 
 Errors fail open and leave the prompt unchanged. Prefix a prompt with `~` or `<` to skip routing.
 
+### How model IDs are resolved
+
+Routing itself only ever emits bare aliases (`haiku`/`sonnet`/`opus`/`fable`); Claude Code resolves each alias to its current default model, so routing never depends on a hard-coded model ID.
+
+The SessionStart context also prints an informational "Alias resolution" line mapping each targeted alias to a concrete ID. `hooks/router/models.py` picks the newest ID per family it can find, offline only:
+
+- a static floor (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1);
+- IDs Claude Code already recorded in `~/.claude.json` (the extra-model-options cache and every project's `lastModelUsage`);
+- `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` environment overrides, which win outright.
+
+A higher version from any source replaces a lower one. Mythos IDs are never accepted. Every read is fail-open.
+
+Those same env vars also pin what Claude Code resolves the alias to, not just what this line reports, so a stale `ANTHROPIC_DEFAULT_OPUS_MODEL` in `settings.json` keeps every `opus` spawn on the pinned model until it's removed.
+
 ![Sub-agent spawned with the routed model](assets/sub-agent-routing.png)
 
 <!-- advisory:start -->
@@ -90,6 +104,30 @@ Use `~/.claude/model-router.json` globally or `.claude/model-router.json` in one
 | `classifier.cli_fallback` | `true` | Use `claude -p --model haiku` for ambiguous prompts. |
 | `thresholds.effort_warn_distance` | `2` | Warn near a class boundary. |
 
+### Example: opus by default, fable for extreme work, cheaper tiers below
+
+```json
+{
+  "version": 2,
+  "apply_mode": "warn",
+  "allow_fable_autoswitch": true,
+  "subagent_enforcement": "on",
+  "classifier": { "cli_fallback": false },
+  "classes": {
+    "mechanical": { "target": { "model": "haiku" } },
+    "implementation": { "target": { "model": "sonnet", "effort": "high" } },
+    "debugging": { "target": { "model": "opus", "effort": "high" } },
+    "architecture": { "target": { "model": "opus", "effort": "xhigh" } },
+    "extreme": { "target": { "model": "fable", "effort": "high" } }
+  }
+}
+```
+
+- A partial `target` override deep-merges onto the shipped default, so it keeps whatever model or effort it doesn't override.
+- The main session is only ever down-routed to haiku, and only past a confidence margin guard. A sonnet `implementation` target therefore changes what model sub-agent spawns get, but an opus session asked for implementation work simply stays on opus at the target effort.
+- An `extreme` prompt on an opus session up-routes to fable here (warn mode asks you to run `/model fable` and `/effort high`, then resend).
+- Re-run the installer after changing class targets, so the routed-`*` agent files regenerate. The `SessionStart` context warns when a declared variant is missing.
+
 <details>
 <summary>Alternative installs</summary>
 
@@ -115,7 +153,7 @@ py plugins/claude-model-router-hook/install.py       # Windows
 python3 plugins/claude-model-router-hook/install.py  # macOS / Linux
 ```
 
-The printed hook commands use the absolute path of the interpreter that ran the installer, so they keep working even if `python`/`python3` on `PATH` is a different version or the Windows Store alias.
+The printed hook commands use the absolute path of the interpreter that ran the installer (not whatever `python`/`python3` resolves to on `PATH`, which may be the wrong version or the Windows Store alias), and the path is printed unquoted on purpose: Claude Code on Windows runs hook commands through PowerShell, where a line starting with a quoted string is a ParserError, so a quoted interpreter path would break every hook. If Python or `~/.claude` lives under a path with spaces, the installer instead prints the PowerShell call-operator form (`& "..."`) and a note; move Python to a space-free path on that host instead.
 
 The manual installer prints the `settings.json` entries that you need to add.
 
@@ -125,6 +163,10 @@ The manual installer prints the `settings.json` entries that you need to add.
 
 - Activity is logged at `~/.claude/hooks/model-router-hook.log`, including requested versus resolved sub-agent models.
 - If another `PreToolUse` hook rewrites the same spawn, Claude Code's undocumented merge order decides which rewrite wins.
+- Prefix a prompt with `~` to bypass routing for that prompt only; it's logged as `OVERRIDE`.
+- In warn mode, a mismatch blocks the prompt with a message like `Run /model X and /effort Y, then resend`, until you switch or bypass with `~`. It never changes the running session itself.
+- Autoswitch writes `~/.claude/settings.json` for new sessions only; it still asks you to run `/model` to apply the change to the current one.
+- `max` effort is session-only, so autoswitch persists `xhigh` instead and says so in its message.
 
 ## Project
 

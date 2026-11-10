@@ -20,9 +20,12 @@ import sys
 import tempfile
 import unittest
 
+from _home import patch_home_env, TempHome
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLUGIN_DIR = os.path.join(REPO_ROOT, "plugins", "claude-model-router-hook")
 MANUAL_INSTALLER = os.path.join(PLUGIN_DIR, "install.sh")
+PYTHON_INSTALLER = os.path.join(PLUGIN_DIR, "install.py")
 HOOKS_DIR = os.path.join(PLUGIN_DIR, "hooks")
 AGENTS_DIR = os.path.join(PLUGIN_DIR, "agents")
 GENERATOR = os.path.join(REPO_ROOT, "scripts", "generate_variants.py")
@@ -118,11 +121,17 @@ def _sonnet_free_cfg():
 
 
 def _write_home(tmp, cfg_dict=None, agents=()):
-    """A temp HOME with an optional router config and agent files."""
+    """A temp HOME with an optional router config and agent files.
+
+    Always writes .claude/model-router.json (empty ``{}`` when *cfg_dict* is
+    None) so the parent-directory walk in load_config stops at *tmp* and
+    never reaches the real user's ~/.claude/model-router.json.  This matters
+    on Windows where the default temp directory lives under the user profile.
+    """
     os.makedirs(os.path.join(tmp, ".claude"), exist_ok=True)
-    if cfg_dict is not None:
-        with open(os.path.join(tmp, ".claude", "model-router.json"), "w") as fh:
-            json.dump(cfg_dict, fh)
+    cfg_path = os.path.join(tmp, ".claude", "model-router.json")
+    with open(cfg_path, "w") as fh:
+        json.dump(cfg_dict if cfg_dict is not None else {}, fh)
     if agents:
         agent_dir = os.path.join(tmp, ".claude", "agents")
         os.makedirs(agent_dir, exist_ok=True)
@@ -135,7 +144,7 @@ def _write_home(tmp, cfg_dict=None, agents=()):
 def _run_hook(script, payload, home, extra_env=None):
     """Run a hook entrypoint under a temp HOME; return (returncode, stdout)."""
     env = dict(os.environ)
-    env["HOME"] = home
+    patch_home_env(env, home)
     for key in ("CLAUDE_MODEL_ROUTER_CHILD", "CLAUDE_PLUGIN_ROOT",
                 "CLAUDE_CODE_SUBAGENT_MODEL", "ANTHROPIC_MODEL"):
         env.pop(key, None)
@@ -317,7 +326,7 @@ class TestSessionInitDivergenceWarning(unittest.TestCase):
         return json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
 
     def test_warns_when_a_declared_variant_is_not_installed(self):
-        with tempfile.TemporaryDirectory() as home:
+        with TempHome() as home:
             _write_home(home, {
                 "version": 2,
                 "classes": {
@@ -583,7 +592,7 @@ class TestVariantGenerator(unittest.TestCase):
                 },
             })
             proc = self._run("--agents-dir", agents, "--use-user-config",
-                             env={"HOME": home})
+                             env={"HOME": home, "USERPROFILE": home})
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertEqual(
                 sorted(os.listdir(agents)),
@@ -648,9 +657,11 @@ class TestVariantGenerator(unittest.TestCase):
             self.assertIn("REMOVED: routed-fable-high.md", proc.stdout)
             self.assertFalse(os.path.exists(legacy))
 
+    @unittest.skipIf(sys.platform == "win32",
+                      "chmod-based directory permission test requires POSIX")
     def test_remove_failure_exits_non_zero(self):
         """A stale variant that survives stays selectable; never report success."""
-        if os.geteuid() == 0:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
             self.skipTest("root ignores directory permissions")
         with tempfile.TemporaryDirectory() as tmp:
             agents = os.path.join(tmp, "agents")
@@ -695,6 +706,8 @@ class TestVariantGenerator(unittest.TestCase):
 class TestInstallScript(unittest.TestCase):
     """The manual installer must never restore a config-rejected tier."""
 
+    @unittest.skipIf(sys.platform == "win32",
+                      "bash installer; see TestPythonInstaller for Windows")
     def test_sonnet_free_config_installs_no_sonnet_agent(self):
         with tempfile.TemporaryDirectory() as home:
             _write_home(home, {
@@ -705,7 +718,7 @@ class TestInstallScript(unittest.TestCase):
                 },
             })
             env = dict(os.environ)
-            env["HOME"] = home
+            patch_home_env(env, home)
             proc = subprocess.run(
                 ["bash", MANUAL_INSTALLER],
                 capture_output=True, text=True, env=env,
@@ -715,6 +728,89 @@ class TestInstallScript(unittest.TestCase):
                 os.path.join(home, ".claude", "hooks", "post_tool_use.py")
             ))
             self.assertIn("Under 'PostToolUse'", proc.stdout)
+            installed = sorted(os.listdir(os.path.join(home, ".claude", "agents")))
+            self.assertEqual(
+                installed,
+                ["routed-haiku.md", "routed-opus-high.md",
+                 "routed-opus-max.md", "routed-opus-medium.md",
+                 "routed-opus-xhigh.md"],
+            )
+
+    @unittest.skipIf(sys.platform == "win32",
+                      "bash installer; see TestPythonInstaller for Windows")
+    def test_generator_conflict_aborts_the_install(self):
+        """A hand-written agent file stops the install rather than being eaten."""
+        with tempfile.TemporaryDirectory() as home:
+            _write_home(home, {"version": 2})
+            agents = os.path.join(home, ".claude", "agents")
+            os.makedirs(agents)
+            handwritten = os.path.join(agents, "routed-haiku.md")
+            original = "---\nname: routed-haiku\n---\n\nmine\n"
+            with open(handwritten, "w") as fh:
+                fh.write(original)
+            env = dict(os.environ)
+            patch_home_env(env, home)
+            proc = subprocess.run(
+                ["bash", MANUAL_INSTALLER],
+                capture_output=True, text=True, env=env,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("CONFLICT", proc.stdout)
+            self.assertNotIn("Then restart Claude Code", proc.stdout)
+            with open(handwritten) as fh:
+                self.assertEqual(fh.read(), original)
+
+    @unittest.skipIf(sys.platform == "win32",
+                      "bash installer; see TestPythonInstaller for Windows")
+    def test_failed_install_does_not_reinstate_a_rejected_tier(self):
+        """The old fallback copied the DEFAULTS set, reintroducing sonnet."""
+        with tempfile.TemporaryDirectory() as home:
+            _write_home(home, {
+                "version": 2,
+                "classes": {
+                    "implementation": {"target": {"model": "opus", "effort": "medium"}},
+                    "debugging": {"target": {"model": "opus", "effort": "high"}},
+                },
+            })
+            agents = os.path.join(home, ".claude", "agents")
+            os.makedirs(agents)
+            with open(os.path.join(agents, "routed-haiku.md"), "w") as fh:
+                fh.write("---\nname: routed-haiku\n---\n\nmine\n")
+            env = dict(os.environ)
+            patch_home_env(env, home)
+            proc = subprocess.run(
+                ["bash", MANUAL_INSTALLER],
+                capture_output=True, text=True, env=env,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            for name in os.listdir(agents):
+                self.assertNotIn("sonnet", name)
+
+
+class TestPythonInstaller(unittest.TestCase):
+    """The Python installer (install.py) must exercise the same invariants as
+    the bash installer on every platform."""
+
+    def test_sonnet_free_config_installs_no_sonnet_agent(self):
+        with tempfile.TemporaryDirectory() as home:
+            _write_home(home, {
+                "version": 2,
+                "classes": {
+                    "implementation": {"target": {"model": "opus", "effort": "medium"}},
+                    "debugging": {"target": {"model": "opus", "effort": "high"}},
+                },
+            })
+            env = dict(os.environ)
+            patch_home_env(env, home)
+            proc = subprocess.run(
+                [sys.executable, PYTHON_INSTALLER],
+                capture_output=True, text=True, env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertTrue(os.path.isfile(
+                os.path.join(home, ".claude", "hooks", "post_tool_use.py")
+            ))
+            self.assertIn("PostToolUse", proc.stdout)
             installed = sorted(os.listdir(os.path.join(home, ".claude", "agents")))
             self.assertEqual(
                 installed,
@@ -734,9 +830,9 @@ class TestInstallScript(unittest.TestCase):
             with open(handwritten, "w") as fh:
                 fh.write(original)
             env = dict(os.environ)
-            env["HOME"] = home
+            patch_home_env(env, home)
             proc = subprocess.run(
-                ["bash", MANUAL_INSTALLER],
+                [sys.executable, PYTHON_INSTALLER],
                 capture_output=True, text=True, env=env,
             )
             self.assertNotEqual(proc.returncode, 0)
@@ -760,9 +856,9 @@ class TestInstallScript(unittest.TestCase):
             with open(os.path.join(agents, "routed-haiku.md"), "w") as fh:
                 fh.write("---\nname: routed-haiku\n---\n\nmine\n")
             env = dict(os.environ)
-            env["HOME"] = home
+            patch_home_env(env, home)
             proc = subprocess.run(
-                ["bash", MANUAL_INSTALLER],
+                [sys.executable, PYTHON_INSTALLER],
                 capture_output=True, text=True, env=env,
             )
             self.assertNotEqual(proc.returncode, 0)
@@ -818,9 +914,14 @@ class TestPreToolUseVariantSelection(unittest.TestCase):
     def test_project_scoped_variant_is_selected_from_event_cwd(self):
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as project:
             _write_home(home, {"version": 2, "classifier": {"cli_fallback": False}})
-            agents = os.path.join(project, ".claude", "agents")
-            os.makedirs(agents)
-            with open(os.path.join(agents, "routed-opus-medium.md"), "w") as fh:
+            # Create a .claude/model-router.json sentinel in the project dir so
+            # the parent-directory walk stops here and does not find the real
+            # user's config on Windows (where temp dirs live under the profile).
+            claude_dir = os.path.join(project, ".claude")
+            os.makedirs(os.path.join(claude_dir, "agents"), exist_ok=True)
+            with open(os.path.join(claude_dir, "model-router.json"), "w") as fh:
+                json.dump({}, fh)
+            with open(os.path.join(claude_dir, "agents", "routed-opus-medium.md"), "w") as fh:
                 fh.write(variants.agent_markdown(
                     "routed-opus-medium", "opus", "medium", ("implementation",)
                 ))
@@ -1068,7 +1169,7 @@ class TestGateNeverReachesOutsideTheConfig(unittest.TestCase):
             home = _write_home(os.path.join(tmp, "home"), self.UNUSABLE_IMPL)
             agents = os.path.join(tmp, "agents")
             env = dict(os.environ)
-            env["HOME"] = home
+            patch_home_env(env, home)
             proc = subprocess.run(
                 [sys.executable, GENERATOR, "--agents-dir", agents,
                  "--use-user-config"],
@@ -1139,7 +1240,7 @@ class TestNestedMalformedConfigNeverShutsRoutingDown(unittest.TestCase):
                 })
                 agents = os.path.join(tmp, "agents")
                 env = dict(os.environ)
-                env["HOME"] = home
+                patch_home_env(env, home)
                 proc = subprocess.run(
                     [sys.executable, GENERATOR, "--agents-dir", agents,
                      "--use-user-config"],
@@ -1265,8 +1366,10 @@ class TestInstalledMeansUsable(unittest.TestCase):
                 fh.write(b"\xff\xfe\x00binary")
             self.assertFalse(variants.is_installed(agents, "routed-haiku"))
 
+    @unittest.skipIf(sys.platform == "win32",
+                      "chmod-based file permission test requires POSIX")
     def test_unreadable_file_is_not_installed(self):
-        if os.geteuid() == 0:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
             self.skipTest("root ignores file permissions")
         with tempfile.TemporaryDirectory() as tmp:
             agents = self._agents(tmp)
@@ -1293,7 +1396,7 @@ class TestInstalledMeansUsable(unittest.TestCase):
         self.assertFalse(variants.is_installed("", "routed-haiku"))
 
     def test_spawn_does_not_select_a_directory(self):
-        with tempfile.TemporaryDirectory() as home:
+        with TempHome() as home:
             _write_home(home, {"version": 2, "classifier": {"cli_fallback": False}})
             os.makedirs(os.path.join(home, ".claude", "agents", "routed-haiku.md"))
             payload = json.dumps({
@@ -1311,7 +1414,7 @@ class TestInstalledMeansUsable(unittest.TestCase):
             self.assertIn("not installed", emitted.get("systemMessage", ""))
 
     def test_spawn_does_not_select_a_foreign_file(self):
-        with tempfile.TemporaryDirectory() as home:
+        with TempHome() as home:
             _write_home(home, {"version": 2, "classifier": {"cli_fallback": False}})
             agent_dir = os.path.join(home, ".claude", "agents")
             os.makedirs(agent_dir)
@@ -1328,7 +1431,7 @@ class TestInstalledMeansUsable(unittest.TestCase):
             self.assertEqual(updated["subagent_type"], "general-purpose")
 
     def test_divergence_warning_fires_for_an_occupied_name(self):
-        with tempfile.TemporaryDirectory() as home:
+        with TempHome() as home:
             _write_home(home, {"version": 2})
             agent_dir = os.path.join(home, ".claude", "agents")
             os.makedirs(agent_dir)
