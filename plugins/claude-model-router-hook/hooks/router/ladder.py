@@ -3,13 +3,13 @@
 from dataclasses import dataclass
 import re
 
+from .models import resolve_model_ids
+
 TIERS = ("haiku", "sonnet", "opus", "fable")  # index = rank; mythos nowhere
-MODEL_IDS = {
-    "haiku": "claude-haiku-4-5",
-    "sonnet": "claude-sonnet-5",
-    "opus": "claude-opus-5",
-    "fable": "claude-fable-5",
-}
+# Informational only (advisory text, tests): routing emits bare aliases and the
+# host resolves them. Discovered from local Claude Code caches with a static
+# floor; see models.py.
+MODEL_IDS = resolve_model_ids()
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 

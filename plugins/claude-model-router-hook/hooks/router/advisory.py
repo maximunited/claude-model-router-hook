@@ -13,6 +13,7 @@ config. Edit the row copy in CLASS_ROWS here, nowhere else.
 import textwrap
 
 from .config import DEFAULTS
+from .models import FAMILIES, resolve_model_ids
 from .policy import target_for_class
 
 # Per-class "When to use" copy; tuple order is the table row order. The model
@@ -239,12 +240,43 @@ def _tier_hint(current_model, targets):
     return "Current model: " + model + "."
 
 
-def render_session_context(current_model, cfg=None, missing_variants=()):
+MODEL_IDS_HEADER = "\n### Alias resolution (best effort, from local caches)\n\n"
+
+
+def _model_ids_line(model_ids, targets):
+    """One line mapping each *targeted* alias to the newest concrete ID known locally.
+
+    Only families some class resolves to are named, so the session is never
+    told about a model the config does not declare (the same rule the table
+    follows).
+    """
+    if model_ids is None:
+        try:
+            model_ids = resolve_model_ids()
+        except Exception:
+            return None
+    if not isinstance(model_ids, dict):
+        return None
+    targeted = {target[0] for target in targets.values() if target}
+    pairs = [
+        family + " -> " + str(model_ids[family])
+        for family in FAMILIES
+        if family in targeted and isinstance(model_ids.get(family), str)
+    ]
+    if not pairs:
+        return None
+    return ", ".join(pairs) + ". The host resolves the bare alias; these IDs are informational."
+
+
+def render_session_context(current_model, cfg=None, missing_variants=(), model_ids=None):
     """Return SessionStart additionalContext text for the resolved config.
 
     missing_variants names declared variants with no agent file installed; a
     non-empty list appends a section telling the user how to fix it, rather
     than letting spawns degrade to model-only injection silently.
+
+    model_ids maps aliases to concrete IDs for the informational resolution
+    line; None discovers them via models.resolve_model_ids().
     """
     targets = resolved_targets(cfg)
     context = (
@@ -253,6 +285,9 @@ def render_session_context(current_model, cfg=None, missing_variants=()):
         + _tier_hint(current_model, targets)
         + "\n"
     )
+    ids_line = _model_ids_line(model_ids, targets)
+    if ids_line:
+        context += MODEL_IDS_HEADER + textwrap.fill(ids_line, width=WRAP_WIDTH) + "\n"
     if missing_variants:
         context += (
             DIVERGENCE_HEADER

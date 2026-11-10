@@ -8,6 +8,7 @@ returns None so the heuristic decision applies (fail-open ladder, AC-7.4).
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -151,9 +152,12 @@ def classify_cli(prompt, config, data_dir):
         if cached is not None:
             return cached
 
+    # Resolve through PATH/PATHEXT: on Windows the npm shim is claude.cmd, which
+    # a bare "claude" argv never finds without a shell.
+    claude_bin = shutil.which("claude") or "claude"
     try:
         result = subprocess.run(
-            ["claude", "-p", build_prompt(prompt), "--model", "haiku"],
+            [claude_bin, "-p", build_prompt(prompt), "--model", "haiku"],
             capture_output=True,
             text=True,
             timeout=timeout,

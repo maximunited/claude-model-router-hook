@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented here.
 
+## [Unreleased]
+
+### Added
+- `router/models.py`: best-effort alias -> concrete model ID discovery from local Claude Code caches (`~/.claude.json` model option cache and per-project `lastModelUsage`), with `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` overrides winning and a static floor of Haiku 5.5 / Sonnet 5.5 / Opus 5.5 / Fable 5.1. Offline, fail-open, never admits a Mythos ID.
+- SessionStart context now ends with an "Alias resolution" line naming the resolved ID for each family the config targets. Routing itself still emits bare aliases; the IDs are informational.
+
+### Changed
+- `ladder.MODEL_IDS` is now resolved via `router.models` instead of a frozen table (was Haiku 4.5 / Sonnet 5 / Opus 5 / Fable 5).
+
+### Fixed
+- CLI fallback classifier resolves the `claude` binary through `shutil.which`, so the npm `claude.cmd` shim is found on Windows (a bare `claude` argv never matched without a shell).
+
 ## [2.1.0] - 2026-08-28
 
 ### Added
